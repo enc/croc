@@ -618,21 +618,29 @@ func UnzipDirectory(destination string, source string) error {
 	}
 	defer archive.Close()
 
+	destination, err = filepath.Abs(destination)
+	if err != nil {
+		log.Error(err)
+		return fmt.Errorf("failed to resolve destination: %w", err)
+	}
+	destination = filepath.Clean(destination)
+
 	// Store modification times for all files and directories
 	modTimes := make(map[string]time.Time)
 
 	// First pass: extract all files and directories, store modification times
 	for _, f := range archive.File {
+		if filepath.IsAbs(f.Name) {
+			return fmt.Errorf("invalid file path %s", f.Name)
+		}
 		filePath := filepath.Join(destination, f.Name)
 		fmt.Fprintf(os.Stderr, "\r\033[2K")
 		fmt.Fprintf(os.Stderr, "\rUnzipping file %s", filePath)
 
-		// Issue #593 conceal path traversal vulnerability
-		// make sure the filepath does not have ".."
 		filePath = filepath.Clean(filePath)
-		if strings.Contains(filePath, "..") {
-			log.Errorf("Invalid file path %s\n", filePath)
-			continue
+		// ensure final path is within destination
+		if !strings.HasPrefix(filePath, destination+string(os.PathSeparator)) && filePath != destination {
+			return fmt.Errorf("invalid file path %s", f.Name)
 		}
 
 		// Store modification time for this entry (BOTH files and directories)

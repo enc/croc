@@ -565,6 +565,69 @@ func TestZipAndUnzipRoundTrip(t *testing.T) {
 	verifyFileContent(t, filepath.Join(extractDir, baseName+"/file4.txt"), "Content of file 4")
 }
 
+func TestUnzipDirectoryPreventsPathTraversal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "unzip_traversal_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	zipPath := filepath.Join(tmpDir, "bad.zip")
+	destDir := filepath.Join(tmpDir, "dest")
+
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("Failed to create zip file: %v", err)
+	}
+	writer := zip.NewWriter(zipFile)
+
+	addEntry := func(name, content string) {
+		w, errCreate := writer.Create(name)
+		if errCreate != nil {
+			t.Fatalf("Failed to create zip entry %s: %v", name, errCreate)
+		}
+		if _, errWrite := w.Write([]byte(content)); errWrite != nil {
+			t.Fatalf("Failed to write zip entry %s: %v", name, errWrite)
+		}
+	}
+
+	addEntry("../evil.txt", "malicious")
+	addEntry("nested/../../escape.txt", "escape")
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Failed to close writer: %v", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		t.Fatalf("Failed to close zip file: %v", err)
+	}
+
+	err = UnzipDirectory(destDir, zipPath)
+	if err == nil {
+		t.Fatalf("expected UnzipDirectory to reject traversal entries")
+	}
+
+	outsidePaths := []string{
+		filepath.Join(tmpDir, "evil.txt"),
+		filepath.Join(tmpDir, "escape.txt"),
+	}
+
+	for _, p := range outsidePaths {
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Fatalf("path traversal wrote file outside destination: %s", p)
+		}
+	}
+
+	if _, err := os.Stat(destDir); err == nil {
+		entries, readErr := os.ReadDir(destDir)
+		if readErr != nil {
+			t.Fatalf("failed to read destination dir: %v", readErr)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("expected destination dir to remain empty, found %d entries", len(entries))
+		}
+	}
+}
+
 // Helper function to create test zip file with specific modification time
 func createTestZipWithModTime(zipPath string, modTime time.Time) error {
 	file, err := os.Create(zipPath)
