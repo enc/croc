@@ -20,6 +20,7 @@ var Socks5Proxy = ""
 var HttpProxy = ""
 
 var MAGIC_BYTES = []byte("croc")
+const maxFrameSize = 4 * 1024 * 1024
 
 // Comm is some basic TCP communication
 type Comm struct {
@@ -175,6 +176,11 @@ func (c *Comm) Read() (buf []byte, numBytes int, bs []byte, err error) {
 		return
 	}
 	numBytes = int(numBytesUint32)
+
+	if numBytes > maxFrameSize {
+		err = fmt.Errorf("frame too large: %d > %d", numBytes, maxFrameSize)
+		return
+	}
 
 	// shorten the reading deadline in case getting weird data
 	if err = c.connection.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
